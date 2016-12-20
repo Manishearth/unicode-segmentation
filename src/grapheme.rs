@@ -87,7 +87,9 @@ impl<'a> Iterator for Graphemes<'a> {
         let mut state = Start;
         let mut cat = gr::GC_Any;
 
+        // caching used by next_back() should be invalidated
         self.regional_cache = None;
+        self.catb = None;
 
         for (curr, ch) in self.string.char_indices() {
             idx = curr;
@@ -220,6 +222,9 @@ impl<'a> DoubleEndedIterator for Graphemes<'a> {
         let mut previdx = idx;
         let mut state = Start;
         let mut cat = gr::GC_Any;
+
+        // caching used by next() should be invalidated
+        self.cat = None;
 
         'outer: for (curr, ch) in self.string.char_indices().rev() {
             previdx = idx;
@@ -362,19 +367,23 @@ impl<'a> DoubleEndedIterator for Graphemes<'a> {
         }
 
         self.catb = if take_curr {
-            None
+            // we need this anyway for Prepend lookahead,
+            // might as well cache it so that the next iteration can use it
+            self.string[..idx].chars().rev().next().map(gr::grapheme_category)
         } else  {
             idx = previdx;
             Some(cat)
         };
 
-        if self.extended && cat != gr::GC_Control {
-            // rule GB9b: include any preceding Prepend characters
-            for (i, c) in self.string[..idx].char_indices().rev() {
-                // TODO: Cache this to avoid repeated lookups in the common case.
-                match gr::grapheme_category(c) {
-                    gr::GC_Prepend => idx = i,
-                    _ => break
+        if let Some(gr::GC_Prepend) = self.catb {
+            if self.extended && cat != gr::GC_Control {
+                // rule GB9b: include any preceding Prepend characters
+                for (i, c) in self.string[..idx].char_indices().rev() {
+                    // TODO: Cache this to avoid repeated lookups in the common case.
+                    match gr::grapheme_category(c) {
+                        gr::GC_Prepend => idx = i,
+                        _ => break
+                    }
                 }
             }
         }
