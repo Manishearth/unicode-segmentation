@@ -48,6 +48,7 @@ pub struct Graphemes<'a> {
     extended: bool,
     cat: Option<GraphemeCat>,
     catb: Option<GraphemeCat>,
+    regional_cache: Option<usize>,
 }
 
 // state machine for cluster boundary rules
@@ -85,6 +86,9 @@ impl<'a> Iterator for Graphemes<'a> {
         let mut idx = 0;
         let mut state = Start;
         let mut cat = gr::GC_Any;
+
+        self.regional_cache = None;
+
         for (curr, ch) in self.string.char_indices() {
             idx = curr;
 
@@ -292,12 +296,23 @@ impl<'a> DoubleEndedIterator for Graphemes<'a> {
                 Regional => {               // rule GB12/GB13
                     // Need to scan backward to find if this is preceded by an odd or even number
                     // of Regional_Indicator characters.
-                    //
-                    // TODO: Save this state to avoid O(n^2) re-scanning in long RI sequences?
-                    let prev_chars = self.string[..previdx].chars().rev();
-                    let count = prev_chars.take_while(|c| {
-                        gr::grapheme_category(*c) == gr::GC_Regional_Indicator
-                    }).count();
+                    let count = if let Some(cache) = self.regional_cache {
+                        self.regional_cache = if cache > 0 {
+                            Some(cache - 1)
+                        } else {
+                            None
+                        };
+                        cache
+                    } else {
+                        let prev_chars = self.string[..previdx].chars().rev();
+                        let count = prev_chars.take_while(|c| {
+                            gr::grapheme_category(*c) == gr::GC_Regional_Indicator
+                        }).count();
+                        if count > 0 {
+                            self.regional_cache = Some(count - 1);
+                        }
+                        count
+                    };
                     if count % 2 == 0 {
                         take_curr = false;
                         break;
@@ -372,7 +387,7 @@ impl<'a> DoubleEndedIterator for Graphemes<'a> {
 
 #[inline]
 pub fn new_graphemes<'b>(s: &'b str, is_extended: bool) -> Graphemes<'b> {
-    Graphemes { string: s, extended: is_extended, cat: None, catb: None }
+    Graphemes { string: s, extended: is_extended, cat: None, catb: None, regional_cache: None }
 }
 
 #[inline]
